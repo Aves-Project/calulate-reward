@@ -1,0 +1,59 @@
+from flask import Flask, jsonify
+from web3 import Web3
+
+app = Flask(__name__)
+
+# Blockchain node RPC URL
+geth_rpc_url = "https://rpc.avescoin.io"  # Replace with your node's RPC endpoint
+web3 = Web3(Web3.HTTPProvider(geth_rpc_url))
+
+if not web3.is_connected():
+    raise Exception("Failed to connect to the Ethereum node.")
+
+# Constants
+HALVING_AVES_BLOCK_REWARD = Web3.to_wei(1.5, "ether")  # Post-halving block reward
+HALVING_START_BLOCK = 5000000  # Block height where halving V2 starts
+HALVING_INTERVAL = 1000000  # Blocks after which the reward reduces further
+
+@app.route("/current-reward", methods=["GET"])
+def get_current_reward():
+    try:
+        # Fetch the latest block number
+        latest_block_number = web3.eth.block_number
+
+        # Determine the current reward
+        if latest_block_number < HALVING_START_BLOCK:
+            reward = HALVING_AVES_BLOCK_REWARD
+        else:
+            # Calculate the number of halving cycles
+            halving_cycles = (latest_block_number - HALVING_START_BLOCK) // HALVING_INTERVAL
+            reward = HALVING_AVES_BLOCK_REWARD
+
+            # Reduce reward progressively for each halving cycle (95% per cycle)
+            for _ in range(min(halving_cycles, 22)):  # Cap at 22 cycles as per the logic
+                reward = reward * 95 // 100
+
+        # Split reward into miner's share (95%) and green fund share (5%)
+        green_fund_share = reward // 20  # 5% of the reward
+        miner_share = reward - green_fund_share  # Remaining 95% for the miner
+
+        # Convert reward values to Aves for readability
+        total_reward_in_aves = web3.from_wei(reward, "ether")
+        miner_share_in_aves = web3.from_wei(miner_share, "ether")
+        green_fund_share_in_aves = web3.from_wei(green_fund_share, "ether")
+
+        return jsonify({
+            "block_number": latest_block_number,
+            "total_reward": f"{total_reward_in_aves} AVS",
+            "miner_share": f"{miner_share_in_aves} AVS",
+            "green_fund_share": f"{green_fund_share_in_aves} AVS",
+            "total_reward_in_wei": reward,
+            "miner_share_in_wei": miner_share,
+            "green_fund_share_in_wei": green_fund_share
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
